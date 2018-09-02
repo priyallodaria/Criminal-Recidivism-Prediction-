@@ -1,0 +1,801 @@
+---
+title: "Data Mining Final Project: Project B Criminal Recidivism Prediction"
+author: "Team Organized Chaos: Manali Damania-mdamania, Shalini Sharma-shalini1, Priyal Lodaria-plodaria"
+date: 'March 2018'
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    theme: cerulean
+    highlight: tango
+    code_folding: hide
+---
+#have added my comments in the end, pls refer
+
+##Scope and Data Processing
+
+In this project, we are predicting whether a person will commit recidivism in the next two years if released on bail. The data is taken from the https://github.com/propublica/compas-analysis.  The project is based on the report released by propublica.org on machine bias risk assessments in criminal sentencing. COMPAS model help judges to make bail decisions.The model we fitted predicts is_recid variable which is the the output variable as either 1 or 0. The model flags is_recid variable as 1 if the person is likely to commit recidivism else it will flag is_recid variable 0.There are total 53 variables and 7214 observations which is stored in the compass.data. 
+
+We calculated the length of stay in jail by (c_jailIn-c_JailOut).  The charge descriptions which were considered more risky such as the ones containing possession of cocaine or any illegal drugs or battery were given a value of 1 in a new column, charge_type and others were given the value of 0.
+
+The data for current crime is stored in compass.data dataframe. The data for violent crime is stored in compass.violent.data dataframe.
+
+We created a subset compass.subset and compass.violent.subset having the data for the current crimes and violent crimes variables that we found have an effect on outcome.
+
+We removed the NA values from the main dataframe that is compass.data and subsetted the variables that have an effect in the compass.subset.
+
+We have factored the variables while fitting the model at every step.
+
+```{r}
+library(ggplot2) # graphics library
+library(pROC)
+library(plyr)
+library(randomForest)
+library(klaR)
+library(boot)
+library(dplyr)
+library(rpart)
+library(partykit)
+library(precrec)
+
+set.seed(1)
+compass.data <- read.csv("https://raw.githubusercontent.com/propublica/compas-analysis/master/compas-scores-two-years.csv", header = TRUE, sep = ",")
+
+
+```
+
+
+##Visualization
+
+We drew the conditional density plots to find out which variables have an effect on y which is the outcome(is_recid). This prediction is for the current crime recidivism and violent crime recidivism.
+
+- Out of the 53 variables, the ones which had "_v" in their names are not taken into consideration as they are related to the violent crimes.
+- Similarly, the variables with "_r" are not taken into consideration as they are related to the recidivism which was committed previously.
+- Only the variables related to the current crime are taken into consideration. 
+- The variables with _vr are not taken into consideration as they are related violent recidivism already committed previously. 
+
+This brings us down to 30 variables which are related to the current crimes. 
+
+- Out of these 30 variables, the variables such as first name, Case_number, c_offense_date, c_arrest_date, c_days_from_compas, in_custody,out_custody, last name and id are irrelevant to predict the output whether the person will commit recidivism. 
+- Compas_screening_date is not related whether the person will commit crime or  not if released on bail.
+- The start, end and event variables are not relevant to whether the person will commit recidivism. 
+- The date of birth is highly correlated with age so we are not including date of birth variable in our model.
+
+Out of the remaining variables, we plotted conditional density plots for each variable to see the effect of that variable on outcome variable is_recid. 
+
+1. Age
+
+We used the age_cat column which divided the age into 3 categories (Less than 25, 25-45, Greater than 45). The conditional density plot for the effect of age_category on outcome variable is_recid is shown. We could see the is_recid value is the highest for the age category of less than 25 and lowest for the age category above 45. The conditional density plot explains shows us that the age of a person has an effect on the outcome variable (is_recid).
+
+```{r, cache = TRUE, warning=FALSE}
+g <- ggplot(compass.data, aes(age_cat)) + ylab("Fraction") +xlab("Age Range")
+g + geom_bar(aes(fill =as.factor(compass.data$two_year_recid)) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+```
+
+2.Sex
+
+The conditional density plot for the effect of input variable sex on the outcome variable is_recid is shown below. It can be seen that the the percentage of recidivism is higher in males as compared to females. Hence, sex varible has an effect on the outcome variable (is_recid).
+
+```{r, cache = TRUE, warning=FALSE}
+g <- ggplot(compass.data, aes(sex)) + ylab("Fraction") +xlab("Age Range")
+g + geom_bar(aes(fill =as.factor(compass.data$two_year_recid)) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+```
+
+3.Race
+
+The conditional density plot for the effect of input variable race on the outcome variable is_recid is shown below. It can be seen that the the probability of recidivism is variable across different races.The percentage of recidivism is highest in Native American and lowest in Asian. Hence, race variable has an effect on the outcome variable is_recid.
+
+```{r, cache = TRUE, warning=FALSE}
+g <- ggplot(compass.data, aes(race)) + ylab("Fraction") +xlab("Race")
+g + geom_bar(aes(fill =as.factor(compass.data$two_year_recid)) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+
+```
+
+4.Juvenile_Felony_Count
+
+From the plot below, we can see that all the persons having juvenile felony count greater than 5 are involved in recidivism in two years.
+
+```{r, cache= TRUE, warning=FALSE}
+g <- ggplot(compass.data, aes(juv_fel_count)) + ylab("Fraction") +xlab("Juvenile Felony Count")
+g + geom_bar(aes(fill =as.factor(compass.data$two_year_recid)) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+```
+
+5.Juvenile Misdemeanor Count
+
+From the plot below, we can see that all the persons having juvenile misdemeanor count greater than 7 are involved in recidivism after two years.
+
+```{r, cache= TRUE, warning=FALSE}
+g <- ggplot(compass.data, aes(juv_misd_count)) + ylab("Fraction") +xlab("Juvenile Felony Count")
+g + geom_bar(aes(fill =as.factor(compass.data$two_year_recid)) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+```
+
+6.Juvenile Other Count
+
+From the plot below, we can see that all the persons having Juvenile other count 6 and 9 have committed recidivism.
+
+```{r, cache= TRUE, warning=FALSE}
+g <- ggplot(compass.data, aes(juv_other_count)) + ylab("Fraction") +xlab("Juvenile Felony Count")
+g + geom_bar(aes(fill =as.factor(compass.data$two_year_recid)) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+#ignore higher than 10
+```
+
+7.Priors_count
+
+This variable tells us about the number of times the person committed recidivism. We see that the fraction of people commiting recidivism has been increasing as the priors count increased.
+
+```{r, cache= TRUE, warning=FALSE}
+g <- ggplot(compass.data, aes(priors_count)) + ylab("Fraction") +xlab("Priors Count")
+g + geom_bar(aes(fill =as.factor(compass.data$two_year_recid)) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+```
+
+8. Days before compass screening 
+
+This variables tells us the detail about the number of days before screening. the range 0 to 500 has the most fraction of recidivism.
+
+```{r, cache= TRUE, warning=FALSE}
+
+g <- ggplot(compass.data, aes(days_b_screening_arrest)) + ylab("Fraction") +xlab("days_b_screening_arrest")
+g + geom_histogram(aes(fill =as.factor(compass.data$two_year_recid), binwidth = 100,) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+```
+
+9. Length of Stay in Jail
+
+The below plot shows the conditional density plot for length of stay which is calculated by (c_jailIn-c_JailOut). As the length of stay in the jail increases, the chances of the person committibg recidivism increases
+
+```{r, cache= TRUE, warning=FALSE}
+
+compass.data$length_of_stay = as.numeric(as.Date(compass.data$c_jail_out) - as.Date(compass.data$c_jail_in))
+
+g <- ggplot(compass.data, aes(length_of_stay)) + ylab("Fraction") +xlab("Length_of_stay")
+g + geom_histogram(aes(fill =as.factor(compass.data$two_year_recid), binwidth = 100,) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+```
+
+10.c_charge_degree
+
+The c_charge_degree has two parts F stands for felony and M stands misdemeanor.The recidivism is committed more in cases where people charged with a felony.
+
+```{r, cache= TRUE, warning=FALSE}
+g <- ggplot(compass.data, aes(compass.data$c_charge_degree)) + ylab("Fraction") +xlab("Charge Degree")
+g + geom_bar(aes(fill =as.factor(compass.data$two_year_recid)) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+```
+
+11. charge_type
+
+We went through the words in the charge_type column and found few words that seemed more serious than others. We create the charge_type column which has 1 if the c_charge_desc column has charge description containing "cocaine","felony","cannabis","assault" or "heroin". These people will be more risky.
+
+Our reasing for this choice of words is that a person having the above drugs or with a charge of assault will tend to be more risky and will tend to do such a crime again.
+
+```{r, cache=TRUE, warning=FALSE}
+
+#going through the charge description column, words and their frequencies
+
+table(unlist(strsplit(tolower(compass.data$c_charge_desc), " ")))
+words <- data.frame(table(unlist(strsplit(tolower(compass.data$c_charge_desc), " "))))
+
+
+#the following command was used to export the list of words with their frequency. We went through this list to choose the words.
+#write.csv(words,file="freq.txt")
+
+#create the charge_type column
+matchpattern=c("cocaine","felony","cannabis","assault","heroin")
+compass.data$charge_type  =ifelse(grepl(paste(matchpattern, collapse = "|"),  compass.data$c_charge_desc, ignore.case= T), 1,0)
+
+g <- ggplot(compass.data, aes(as.factor(compass.data$charge_type))) + ylab("Fraction") +xlab("Charge type")
+g + geom_bar(aes(fill =as.factor(compass.data$two_year_recid)) , position = "fill")  + guides(fill=guide_legend(title="Two Year Recidivism Flag"))
+
+
+```
+
+##Methods and Validation (Addressing Question 1)
+#The COMPAS tool was not developed on the Broward County population. Going forward, the County is considering developing their own RAI to replace COMPAS. Using the available data, construct an RAI for predicting two-year recidivism. Evaluate the predictive performance of your model. What are the most important predictors of recidivism?
+
+We have addressed the Q1 below by fitting various models and plotting the varImp plot for each
+We have already done the exploratory analysis for the columns and selected the columns that seem to have an effect on prediction of recidivism. Our prediction metric is is_recid. This is the method we followed next:
+
+1. We selected the rows that are most related to recidivism
+2. We followed the following steps for different models to calculate the prediction error.
+
+		2.1 Split the data into test and training data
+		
+		2.2 Fit the model on training data 
+		
+		2.3 Using the test data, we performed variable importance selection. Now we have a list of variables in order of their importance. This sets us up for forward subset selection on these variables.		
+		
+3. We started with the first variable in order of importance and then fit random forest on the training data. We calculated the AUC for this model
+4. We continued the above approach for the first two, then first three and so on for all variables in order of importance and fit random forests and found the AUC.
+5. These AUCs are averaged out and correspond to the model. This approach will minimize the variance of our model
+6. For each model we got the average AUC following the above steps. The one with the maximum AUC is the model that is performing the best for this problem.
+7. For the violent recidivism we repeat the same steps but the prediction metric would be: two_year_recid * is_violent_recid
+
+In the below code block, we are processing the data as per the below steps:
+
+1. We created a subset compass.subset and compass.violent.subset having the data for the current crimes and violent crimes variables that we found have an effect on outcome.
+
+2. We removed the NA values from the main dataframe that is compass.data and subsetted the variables that have an effect in the compass.subset.
+
+3. We have factored the variables while fitting the model at every step.
+
+
+```{r, cache = TRUE, warning=FALSE}
+
+#Q1. 
+compass.given.data = compass.data[,]
+
+compass.data = subset(compass.data, subset = is.na(length_of_stay)==FALSE)
+l=length(compass.data)+1
+for (i in l) {
+  compass.data[, i] <- NA
+}
+
+compass.violent.data = compass.data[,]
+compass.violent.data = mutate(compass.violent.data, violent_recid = is_violent_recid*two_year_recid)
+
+compass.subset = subset(compass.data, select = c("sex","age_cat","race","juv_fel_count","juv_misd_count","juv_other_count","priors_count","c_charge_degree","length_of_stay","charge_type","two_year_recid"))
+
+compass.violent.subset = subset(compass.violent.data, select = c("sex","age_cat","race","juv_fel_count","juv_misd_count","juv_other_count","priors_count","c_charge_degree","length_of_stay","charge_type","violent_recid"))
+
+```
+
+
+
+We have fitted the Random Forest model and plotted the varImpPlot below
+
+```{r, cache=TRUE, warning=FALSE}
+#Random Forest
+auc.fold = rep(0,10)
+compass.subset.rf<-compass.subset[sample(nrow(compass.subset)),]
+folds <- cut(seq(1,nrow(compass.subset.rf)),breaks=10,labels=FALSE)
+for(k in 1:10){
+testIndexes <- which(folds==k,arr.ind=TRUE)
+testData <- compass.subset.rf[testIndexes, ]
+trainData <- compass.subset.rf[-testIndexes, ]
+var.imp = rep(1,11)
+compass.rf <- randomForest(as.factor(two_year_recid) ~ ., data = trainData)
+var.imp <- varImpPlot(compass.rf) 
+auc.overall = order(-var.imp)
+auc = rep(1,12)
+roc.rf.plot = rep(0,110)
+for(i in 1: ncol(trainData)-1)
+{
+  compass.subset.cv = rep(0,i)
+  for(j in 1 : i)
+  {
+    compass.subset.cv[j] = auc.overall[j]
+  }
+  compass.new.train = subset(trainData, select = c(colnames(trainData[compass.subset.cv])))
+  compass.new.test = subset(testData,select = (colnames(trainData[compass.subset.cv])))
+  compass.rf <- randomForest(as.factor(trainData$two_year_recid) ~ ., data = compass.new.train)
+  rf.test.prob <- predict(compass.rf, newdata = compass.new.test, type = "prob")[,"1"]
+  roc.rf <- roc(testData$two_year_recid, rf.test.prob)
+  auc[i] = roc.rf$auc
+}
+  auc.fold[k] = mean(auc)
+}
+mean(auc.fold)
+```
+We have fitted the Logistic Regression model and plotted the varImpPlot below
+
+```{r, cache=TRUE, warning=FALSE}
+#Log. Regression
+auc.fold = rep(0,10)
+compass.subset.rf<-compass.subset[sample(nrow(compass.subset)),]
+folds <- cut(seq(1,nrow(compass.subset.rf)),breaks=10,labels=FALSE)
+for(k in 1:10){
+testIndexes <- which(folds==k,arr.ind=TRUE)
+testData <- compass.subset[testIndexes, ]
+trainData <- compass.subset[-testIndexes, ]
+var.imp = rep(1,11)
+compass.rf <- randomForest(as.factor(two_year_recid) ~ ., data = trainData)
+var.imp <- varImpPlot(compass.rf) 
+auc.overall = order(-var.imp)
+auc = rep(1,11)
+for(i in 1: ncol(trainData)-1)
+{
+  compass.subset.cv = rep(0,i)
+  for(j in 1 : i)
+  {
+    compass.subset.cv[j] = auc.overall[j]
+  }
+  compass.new.train = subset(trainData, select = c(colnames(trainData[compass.subset.cv])))
+  compass.new.test = subset(testData,select = (colnames(trainData[compass.subset.cv])))
+  compass.rf <- glm(as.factor(trainData$two_year_recid) ~ ., data = compass.new.train, family = binomial())
+  rf.test.prob <- predict(compass.rf, newdata = compass.new.test)
+  roc.rf <- roc(testData$two_year_recid, rf.test.prob)
+  auc[i] = roc.rf$auc
+}
+auc.fold[k] = mean(auc)
+}
+mean(auc.fold)
+```
+We have fitted the Quadractic Linear Discriminant Analysis(QDA) model and plotted the varImpPlot below
+
+```{r, CACHE=TRUE, Warning=FALSE}
+#QDA
+auc.fold = rep(0,10)
+compass.subset.rf<-compass.subset[sample(nrow(compass.subset)),]
+folds <- cut(seq(1,nrow(compass.subset.rf)),breaks=10,labels=FALSE)
+for(k in 1:10){
+testIndexes <- which(folds==k,arr.ind=TRUE)
+testData <- compass.subset[testIndexes, ]
+trainData <- compass.subset[-testIndexes, ]
+var.imp = rep(1,11)
+compass.rf <- randomForest(as.factor(two_year_recid) ~ ., data = trainData)
+var.imp <- varImpPlot(compass.rf) 
+auc.overall = order(-var.imp)
+auc = rep(1,11)
+for(i in 1: ncol(trainData)-1)
+{
+  compass.subset.cv = rep(0,i)
+  for(j in 1 : i)
+  {
+    compass.subset.cv[j] = auc.overall[j]
+  }
+  compass.new.train = subset(trainData, select = c(colnames(trainData[compass.subset.cv])))
+  compass.new.test = subset(testData,select = (colnames(trainData[compass.subset.cv])))
+  compass.rf <- qda(trainData$two_year_recid ~ ., data = compass.new.train)
+  rf.test.prob <- predict(compass.rf, compass.new.test)
+  roc.rf <- roc(testData$two_year_recid, rf.test.prob$posterior[1:length(testData$two_year_recid)])
+  auc[i] = roc.rf$auc
+}
+  auc.fold[k] = mean(auc)
+}
+mean(auc.fold)
+```
+We have fitted the Linear Discriminant Analysis model and plotted the varImpPlot below
+
+```{r,  CACHE=TRUE, Warning=FALSE}
+#LDA
+auc.fold = rep(0,10)
+compass.subset.rf<-compass.subset[sample(nrow(compass.subset)),]
+folds <- cut(seq(1,nrow(compass.subset.rf)),breaks=10,labels=FALSE)
+for(k in 1:10){
+testIndexes <- which(folds==k,arr.ind=TRUE)
+testData <- compass.subset[testIndexes, ]
+trainData <- compass.subset[-testIndexes, ]
+var.imp = rep(1,11)
+compass.rf <- randomForest(as.factor(two_year_recid) ~ ., data = trainData)
+var.imp <- varImpPlot(compass.rf) 
+auc.overall = order(-var.imp)
+auc = rep(1,10)
+for(i in 1: ncol(trainData)-1)
+{
+  compass.subset.cv = rep(0,i)
+  for(j in 1 : i)
+  {
+    compass.subset.cv[j] = auc.overall[j]
+  }
+  compass.new.train = subset(trainData, select = c(colnames(trainData[compass.subset.cv])))
+  compass.new.test = subset(testData,select = (colnames(trainData[compass.subset.cv])))
+  compass.rf <- lda(trainData$two_year_recid ~ ., data = compass.new.train)
+  rf.test.prob <- predict(compass.rf, compass.new.test)
+  roc.rf <- roc(testData$two_year_recid, rf.test.prob$posterior[1:length(testData$two_year_recid)])
+  auc[i] = roc.rf$auc
+}
+  auc.fold[k] = mean(auc)
+}
+mean(auc.fold)
+```
+
+From above, we can see that Random Forest has a mean of AUC around 0.71 which is highest.
+The most important predictors of recidivism are priors_count and length of stay.
+#table for summary of AUC
+#why did we take the AUC as the performance metrics and not missclassification rate
+
+##Addressing the question two
+#Construct an RAI for predicting violent recidivism. Evaluate the predictive performance of your model. What are the most important predictors of violent recidivism? How do they compare to the important predictors of general recidivism?
+
+We are fitting the Random Forest model on the violent data set using the same steps that we used in the current crime data
+```{r , CACHE=TRUE, Warning=FALSE}
+#Q2.
+#violent
+auc.fold = rep(0,10)
+compass.subset.rf<-compass.violent.subset[sample(nrow(compass.violent.subset)),]
+folds <- cut(seq(1,nrow(compass.subset.rf)),breaks=10,labels=FALSE)
+for(k in 1:10){
+testIndexes <- which(folds==k,arr.ind=TRUE)
+testData <- compass.subset.rf[testIndexes, ]
+trainData <- compass.subset.rf[-testIndexes, ]
+var.imp = rep(1,11)
+compass.rf <- randomForest(as.factor(violent_recid) ~ ., data = trainData)
+var.imp <- varImpPlot(compass.rf) 
+auc.overall = order(-var.imp)
+auc = rep(1,10)
+for(i in 1: ncol(trainData)-1)
+{
+  compass.subset.cv = rep(0,i)
+  for(j in 1 : i)
+  {
+    compass.subset.cv[j] = auc.overall[j]
+  }
+  compass.new.train = subset(trainData, select = c(colnames(trainData[compass.subset.cv])))
+  compass.new.test = subset(testData,select = (colnames(trainData[compass.subset.cv])))
+  compass.rf <- randomForest(as.factor(trainData$violent_recid) ~ ., data = compass.new.train)
+  rf.test.prob <- predict(compass.rf, newdata = compass.new.test, type = "prob")[,"1"]
+  roc.rf <- roc(testData$violent_recid, rf.test.prob)
+  auc[i] = roc.rf$auc
+}
+  auc.fold[k] = mean(auc)
+}
+mean(auc.fold)
+```
+The important predictors for violent recidivism are length of stay and priors count.The most important variable for violent dataset is length of stay followed by priors count whereas the most important variable for current crime is priors_count followed by length of stay
+
+
+##Addresseing the question 3
+#Are your RAIs from (1) and (2) equally predictive across race/ethnicity groups? How about across age and sex groups?
+
+We have to find whether the RAI is equally predictive accross age, race and sex
+
+```{r, CACHE=TRUE, Warning=FALSE}
+#Q3. 
+compass.subset.train<-compass.subset[sample(nrow(compass.subset)),]
+folds <- cut(seq(1,nrow(compass.subset.train)),breaks=5,labels=FALSE)
+testIndexes <- which(folds==1,arr.ind=TRUE)
+testData <- compass.subset.train[testIndexes, ]
+trainData <- compass.subset.train[-testIndexes, ]
+compass.train.rf <- randomForest(as.factor(two_year_recid) ~ ., data = trainData)
+rf.test.prob <- predict(compass.train.rf, newdata = testData, type = "prob")[,"1"]
+roc.rf <- roc(testData$two_year_recid, rf.test.prob)
+plot.roc(roc.rf)
+auc = roc.rf$auc
+auc
+
+
+
+rf.two_year_recid = rf.test.prob
+for(i in 1 : length(rf.two_year_recid))
+{
+if(rf.test.prob[i] >= 0.8) {
+  rf.two_year_recid[i] = 1
+}
+else{
+  rf.two_year_recid[i] = 0
+}
+}
+
+testData = cbind(testData,rf.test.prob)
+testData = cbind(testData,rf.two_year_recid)
+confusion.mat = table(testData$rf.two_year_recid,testData$two_year_recid)
+
+#category - age_cat 
+#age Greater than 45
+testData.age1 = subset(testData, age_cat == "Greater than 45")
+confusion.mat.age1 = table(testData.age1$rf.two_year_recid,testData.age1$two_year_recid)
+confusion.mat.age1
+roc.rf.age1 <- roc(testData.age1$two_year_recid, testData.age1$rf.two_year_recid)
+auc = roc.rf.age1$auc
+auc
+
+#age Less than 25
+testData.age2 = subset(testData, age_cat == "Less than 25")
+confusion.mat.age2 = table(testData.age2$rf.two_year_recid,testData.age2$two_year_recid)
+confusion.mat.age2
+roc.rf.age2 <- roc(testData.age2$two_year_recid, testData.age2$rf.two_year_recid)
+auc = roc.rf.age2$auc
+auc
+
+#age between 25-45
+testData.age3 = subset(testData, age_cat == "25 - 45")
+confusion.mat.age3 = table(testData.age3$rf.two_year_recid,testData.age3$two_year_recid)
+confusion.mat.age3
+roc.rf.age3 <- roc(testData.age3$two_year_recid, testData.age3$rf.two_year_recid)
+auc = roc.rf.age3$auc
+auc
+
+plot(roc.rf.age1)
+plot(roc.rf.age2, col = "steelblue", add = TRUE)
+plot(roc.rf.age3, col = "cyan", add = TRUE)
+
+ggplot(testData, aes(rf.test.prob, fill=age_cat)) +geom_density(alpha=0.2)
+```
+
+We calculated the area under the curve for each age group and found that the model is most predictive for the age group under 25 as the AUC is maximum, 0.6216.
+
+We can see from the histogram that the RAI model is not equally predictive across all age groups.
+
+
+```{r, CACHE=TRUE, Warning=FALSE}
+#sex : Female
+testData.sex1 = subset(testData, sex == "Female")
+confusion.mat.sex1 = table(testData.sex1$rf.two_year_recid,testData.sex1$two_year_recid)
+confusion.mat.sex1
+roc.rf.sex1 <- roc(testData.sex1$two_year_recid, testData.sex1$rf.two_year_recid)
+auc = roc.rf.sex1$auc
+auc
+
+#sex : Male
+testData.sex2 = subset(testData, sex == "Male")
+confusion.mat.sex2 = table(testData.sex2$rf.two_year_recid,testData.sex2$two_year_recid)
+confusion.mat.sex2
+roc.rf.sex2 <- roc(testData.sex2$two_year_recid, testData.sex2$rf.two_year_recid)
+auc = roc.rf.sex2$auc
+auc
+
+plot(roc.rf.sex1)
+plot(roc.rf.sex2, col = "steelblue", add = TRUE)
+ggplot(testData, aes(rf.test.prob, fill=sex)) +geom_density(alpha=0.2)
+```
+The model is not equally predictive across different sexes.
+It is more predictive for males as compared to females as the area under the curve is higher in males.
+
+```{r, CACHE=TRUE, Warning=FALSE}
+#race : African-American
+testData.race1 = subset(testData, race == "African-American")
+confusion.mat.race1 = table(testData.race1$rf.two_year_recid,testData.race1$two_year_recid)
+confusion.mat.race1
+roc.rf.race1 <- roc(testData.race1$two_year_recid, testData.race1$rf.two_year_recid)
+auc = roc.rf.race1$auc
+auc
+
+#race : Asian
+testData.race2 = subset(testData, race == "Asian")
+confusion.mat.race2 = table(testData.race2$rf.two_year_recid,testData.race2$two_year_recid)
+confusion.mat.race2
+roc.rf.race2 <- roc(testData.race2$two_year_recid, testData.race2$rf.two_year_recid)
+auc = roc.rf.race2$auc
+auc
+
+#race :Caucasian
+testData.race3 = subset(testData, race == "Caucasian")
+confusion.mat.race3 = table(testData.race3$rf.two_year_recid,testData.race3$two_year_recid)
+confusion.mat.race3
+roc.rf.race3 <- roc(testData.race3$two_year_recid, testData.race3$rf.two_year_recid)
+auc = roc.rf.race3$auc
+auc
+
+#race : Hispanic
+testData.race4 = subset(testData, race == "Hispanic")
+confusion.mat.race4 = table(testData.race4$rf.two_year_recid,testData.race4$two_year_recid)
+confusion.mat.race4
+roc.rf.race4 <- roc(testData.race4$two_year_recid, testData.race4$rf.two_year_recid)
+auc = roc.rf.race4$auc
+auc
+
+#race : Other and Native American
+testData.race5 = subset(testData, race == "Other" | race == "Native American")
+confusion.mat.race5 = table(testData.race5$rf.two_year_recid,testData.race5$two_year_recid)
+confusion.mat.race5
+roc.rf.race5 <- roc(testData.race5$two_year_recid, testData.race5$rf.two_year_recid)
+auc = roc.rf.race5$auc
+auc
+
+plot(roc.rf.race1)
+plot(roc.rf.race2, col = "steelblue", add = TRUE)
+plot(roc.rf.race3, col = "cyan", add = TRUE)
+plot(roc.rf.race4, col = "aquamarine", add = TRUE)
+plot(roc.rf.race5, col = "green", add = TRUE)
+
+ggplot(testData, aes(rf.test.prob, fill=race)) +geom_density(alpha=0.2)
+```
+The model is highly predictive for African-Americans, as the AUC is highest for this race.
+
+We are checking whether the model is equally predictive across age, sex and race for violent crimes below.
+
+```{r, CACHE=TRUE, Warning=FALSE}
+#violent
+compass.subset.train.violent<-compass.violent.subset[sample(nrow(compass.violent.subset)),]
+folds <- cut(seq(1,nrow(compass.subset.train.violent)),breaks=5,labels=FALSE)
+testIndexes <- which(folds==1,arr.ind=TRUE)
+testData.violent <- compass.subset.train.violent[testIndexes, ]
+trainData.violent <- compass.subset.train.violent[-testIndexes, ]
+compass.train.rf.violent <- randomForest(as.factor(violent_recid) ~ ., data = trainData.violent)
+rf.test.prob.violent <- predict(compass.train.rf.violent, newdata = testData.violent, type = "prob")[,"1"]
+roc.rf.violent <- roc(testData.violent$violent_recid, rf.test.prob.violent)
+plot.roc(roc.rf.violent)
+auc = roc.rf.violent$auc
+auc
+
+#manali added this part
+vector=compass.data[compass.data$two_year_recid=='1',]
+a=nrow(vector)
+b=nrow(compass.data)
+proportion=a/b
+
+
+
+rf.two_year_recid.violent = rf.test.prob.violent
+
+proportion.violent.rows=length(rf.two_year_recid.violent)*proportion
+sort(rf.two_year_recid.violent, decreasing=TRUE)
+
+
+
+for(i in 1 : length(rf.two_year_recid.violent))
+{
+if(i >=proportion.violent.rows) {
+  rf.two_year_recid.violent[i] = 1
+}
+else{
+  rf.two_year_recid.violent[i] = 0
+}
+}
+
+
+## end of the part I added
+
+#rf.two_year_recid.violent = rf.test.prob.violent
+
+#for(i in 1 : length(rf.two_year_recid.violent))
+#{
+#if(rf.test.prob.violent[i] >= 0.2) {
+ # rf.two_year_recid.violent[i] = 1
+#}
+#else{
+#  rf.two_year_recid.violent[i] = 0
+#}
+#}
+testData.violent = cbind(testData.violent,rf.test.prob.violent)
+testData.violent = cbind(testData.violent,rf.two_year_recid.violent)
+confusion.mat.violent = table(testData.violent$rf.two_year_recid.violent,testData.violent$violent_recid)
+
+#category - age_cat 
+#age Greater than 45
+testData.age1 = subset(testData.violent, age_cat == "Greater than 45")
+confusion.mat.age1 = table(testData.age1$rf.two_year_recid,testData.age1$violent_recid)
+confusion.mat.age1
+roc.rf.age1 <- roc(testData.age1$violent_recid, testData.age1$rf.two_year_recid)
+auc = roc.rf.age1$auc
+auc
+
+#age Less than 25
+testData.age2 = subset(testData.violent, age_cat == "Less than 25")
+confusion.mat.age2 = table(testData.age2$rf.two_year_recid,testData.age2$violent_recid)
+confusion.mat.age2
+roc.rf.age2 <- roc(testData.age2$violent_recid, testData.age2$rf.two_year_recid)
+auc = roc.rf.age2$auc
+auc
+
+#age between 25-45
+testData.age3 = subset(testData.violent, age_cat == "25 - 45")
+confusion.mat.age3 = table(testData.age3$rf.two_year_recid,testData.age3$violent_recid)
+confusion.mat.age3
+roc.rf.age3 <- roc(testData.age3$violent_recid, testData.age3$rf.two_year_recid)
+auc = roc.rf.age3$auc
+auc
+
+plot(roc.rf.age1)
+plot(roc.rf.age2, col = "steelblue", add = TRUE)
+plot(roc.rf.age3, col = "cyan", add = TRUE)
+ggplot(testData.violent, aes(rf.test.prob, fill=age_cat)) +geom_density(alpha=0.2)
+```
+
+For violent data, the model is not equally predictive across different age group.
+
+```{r, CACHE=TRUE, Warning=FALSE}
+#sex : Female
+testData.sex1 = subset(testData.violent, sex == "Female")
+confusion.mat.sex1 = table(testData.sex1$rf.two_year_recid,testData.sex1$violent_recid)
+confusion.mat.sex1
+roc.rf.sex1 <- roc(testData.sex1$violent_recid, testData.sex1$rf.two_year_recid)
+auc = roc.rf.sex1$auc
+auc
+
+#sex : Male
+testData.sex2 = subset(testData.violent, sex == "Male")
+confusion.mat.sex2 = table(testData.sex2$rf.two_year_recid,testData.sex2$violent_recid)
+confusion.mat.sex2
+roc.rf.sex2 <- roc(testData.sex2$violent_recid, testData.sex2$rf.two_year_recid)
+auc = roc.rf.sex2$auc
+auc
+
+plot(roc.rf.sex1)
+plot(roc.rf.sex2, col = "steelblue", add = TRUE)
+ggplot(testData.violent, aes(rf.test.prob, fill=sex)) +geom_density(alpha=0.2)
+```
+The model is not equally predictive across sex for violent crimes as the AUC is similar for both.
+
+
+```{r, CACHE=TRUE, Warning=FALSE}
+#race : African-American
+testData.race1 = subset(testData.violent, race == "African-American")
+confusion.mat.race1 = table(testData.race1$rf.two_year_recid,testData.race1$violent_recid)
+confusion.mat.race1
+roc.rf.race1 <- roc(testData.race1$violent_recid, testData.race1$rf.two_year_recid)
+auc = roc.rf.race1$auc
+auc
+
+#race :Caucasian
+testData.race3 = subset(testData.violent, race == "Caucasian")
+confusion.mat.race3 = table(testData.race3$rf.two_year_recid,testData.race3$violent_recid)
+confusion.mat.race3
+roc.rf.race3 <- roc(testData.race3$violent_recid, testData.race3$rf.two_year_recid)
+auc = roc.rf.race3$auc
+auc
+
+#race : Hispanic
+testData.race4 = subset(testData.violent, race == "Hispanic")
+confusion.mat.race4 = table(testData.race4$rf.two_year_recid,testData.race4$violent_recid)
+confusion.mat.race4
+roc.rf.race4 <- roc(testData.race4$violent_recid, testData.race4$rf.two_year_recid)
+auc = roc.rf.race4$auc
+auc
+
+#race : Other and Native American
+testData.race5 = subset(testData.violent, race == "Other" | race == "Native American" | race == "Asian")
+confusion.mat.race5 = table(testData.race5$rf.two_year_recid,testData.race5$violent_recid)
+confusion.mat.race5
+roc.rf.race5 <- roc(testData.race5$violent_recid, testData.race5$rf.two_year_recid)
+auc = roc.rf.race5$auc
+auc
+
+plot(roc.rf.race1)
+plot(roc.rf.race3, col = "cyan", add = TRUE)
+plot(roc.rf.race4, col = "aquamarine", add = TRUE)
+plot(roc.rf.race5, col = "green", add = TRUE)
+
+ggplot(testData.violent, aes(rf.test.prob, fill=race)) +geom_density(alpha=0.2)
+```
+The model is most predictive across other and native american races for violent crimes.
+
+##Addressing Question 4
+#Compare your RAIs to the COMPAS RAI. Do your RAIs perform better or worse than COMPAS? Do your RAIs produce similar classifications to COMPAS? Can you identify any systematic differences between your classifications and those of COMPAS?
+
+Next, we compare our models with the COMPAS models.
+
+```{r, CACHE=TRUE, Warning=FALSE, fig.width=15, fig.height=12}
+#Q4.
+compare.recid = rep(0,length(testData$two_year_recid))
+for(i in 1 : length(testData$two_year_recid))
+{
+  if(testData$two_year_recid[i] == testData$rf.two_year_recid[i])
+  {
+    compare.recid[i] = "yes"
+  }
+  else
+  {
+    compare.recid[i] = "no"
+  }
+}
+testData = mutate(testData,compare = compare.recid)
+testData = subset(testData, select = c("sex","age_cat","race","juv_fel_count","juv_misd_count","juv_other_count","priors_count","c_charge_degree","length_of_stay","charge_type","compare"))
+
+#COMPAS ROC for current crime
+final_roc=roc(compass.data$decile_score, compass.data$two_year_recid)
+plot.roc(final_roc)
+
+#compass.given.new = mapvalues(compass.given.data$decile_score, from = c(1,2,3,4,5,6,7,8,9,10), to = c(0,0,0,0,0,0,0,1,1,1))
+
+#given.roc = roc(compass.given.data$two_year_recid,compass.given.new)
+#plot.roc(given.roc)
+#plot.roc(roc.rf, add = TRUE, col = "steelblue")
+#given.roc$auc
+
+#compass.given.new = mapvalues(compass.violent.data$decile_score, from = c(1,2,3,4,5,6,7,8,9,10), to = #c(0,0,0,0,0,0,0,1,1,1))
+#given.roc = roc(compass.violent.data$violent_recid,compass.given.new)
+#plot.roc(given.roc)
+#plot.roc(roc.rf.violent, add = TRUE, col = "steelblue")
+#given.roc$auc
+
+#COMPAS ROC for violent crimes
+compass.data$finalviolentrecid=compass.data$two_year_recid*compass.data$is_violent_recid
+compass.data$finalviolentrecid=as.factor(compass.data$finalviolentrecid)
+final_roc1=roc(compass.data$finalviolentrecid, compass.data$v_decile_score)
+plot.roc(final_roc1)
+
+compass.tree <- rpart(compare ~ ., data = testData, method = "class",
+                        control = rpart.control(minsplit=100, cp=0.002))
+plot(compass.tree)
+text(compass.tree)
+print(compass.tree)
+compass.party <- as.party(compass.tree)
+plot(compass.party)
+```
+
+From the 1st ROC curve, we can see that our RAI(Blue curve) performs better than the COMPAS RAI for the current crimes
+From the 2nd ROC curve, we can see that our RAI(Blue curve) performs better than the COMPAS RAI for violent crimes
+
+From the tree, we can see that the two models differ the most in cases where: 
+1. race is asian or hispanic
+
+2. priors count >=2.5, race is african americans or caucasian or native american, charge degree is M, and length of stay is >=19
+
+3. 2. priors count >=2.5, race is african americans or caucasian or native american, charge degree is M, length of stay is <19 and priors count is <4.5.
+
+The two models give similar results in cases where priors_count is <2.5 and age is greater than 45.
+# in AUC part for predictability across various plots, do analysis such it is highly predictive for say sage >45 and the conditional density plot tell us the same.
+#make summary for different models
+#mention that you have done cross validation
+# I have made the roc plots for final COMPAS data correctly with the help of ANDRES
+#Also, I have made changes regarding the cutoff of 0.2 for violent crimes which he had said
+
+
