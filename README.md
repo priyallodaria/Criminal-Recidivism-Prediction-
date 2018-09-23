@@ -21,5 +21,7 @@ A. To determine the best classifier
   3. We started with the first variable in order of importance and then fit random forest on the training data. We calculated the AUC for this model
   4. We continued the above approach for the first two, then first three and so on for all variables in order of importance and fit random forests and found the AUC.
   5. These AUCs were averaged out and correspond to the model. This approach minimized the variance of our model
+
 B. To compare the instrument across race, sex and age, we calculated the area under the curve for each group and also plotted histograms.
+
 C. To compare with the COMPAS tool, we plotted ROC curves, and confirmed our model performs better than the COMPAS tool. We also displayed a decision tree to compare the two models.
